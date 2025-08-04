@@ -1,5 +1,6 @@
 import { useState } from "react";
 import "./App.css";
+import { Link } from "react-router-dom";
 
 // MUI Components
 import AppBar from "@mui/material/AppBar";
@@ -62,6 +63,16 @@ function App() {
         <footer className="footer">
           &copy; {new Date().getFullYear()} SzámlAI — Made in Hungary 🇭🇺
         </footer>
+        <Link
+          to="/invoice"
+          style={{
+            marginTop: "2rem",
+            display: "inline-block",
+            color: "#0070f2",
+          }}
+        >
+          ➕ Ugrás a számlázó oldalra
+        </Link>
       </div>
     </>
   );
