@@ -1,18 +1,33 @@
-import React, { useState } from "react";
+// InvoicePage.jsx - Final Combined Version
+
+import React, { useState, useEffect } from "react";
 import {
   Box,
   Grid,
   TextField,
   Typography,
   Button,
-  IconButton,
+  MenuItem,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
+import LogoutIcon from "@mui/icons-material/Logout";
+import EmailIcon from "@mui/icons-material/Email";
+
 import pdfMake from "pdfmake/build/pdfmake";
 import pdfFonts from "pdfmake/build/vfs_fonts";
-
 pdfMake.vfs = pdfFonts?.pdfMake?.vfs || pdfFonts.vfs;
+
+import { auth, db } from "./firebase";
+import {
+  collection,
+  addDoc,
+  getDocs,
+  doc,
+  getDoc,
+} from "firebase/firestore";
+import { signOut } from "firebase/auth";
+import emailjs from "@emailjs/browser";
 
 function InvoicePage() {
   const [invoiceData, setInvoiceData] = useState({
@@ -24,6 +39,9 @@ function InvoicePage() {
     buyer: { name: "", taxNumber: "" },
     rows: [{ description: "", quantity: 1, price: 0, vat: 27 }],
   });
+
+  const [invoiceList, setInvoiceList] = useState([]);
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState("");
 
   const handleRowChange = (index, field, value) => {
     const newRows = [...invoiceData.rows];
@@ -65,7 +83,11 @@ function InvoicePage() {
                 row.quantity,
                 row.price.toLocaleString("hu-HU"),
                 row.vat + "%",
-                (row.quantity * row.price * (1 + row.vat / 100)).toLocaleString("hu-HU") + " Ft",
+                (
+                  row.quantity *
+                  row.price *
+                  (1 + row.vat / 100)
+                ).toLocaleString("hu-HU") + " Ft",
               ]),
             ],
           },
@@ -73,25 +95,90 @@ function InvoicePage() {
         "\n",
         { text: `Végösszeg: ${total.toLocaleString("hu-HU")} Ft`, bold: true },
       ],
-      styles: {
-        header: {
-          fontSize: 20,
-          bold: true,
-          marginBottom: 10,
-        },
-      },
+      styles: { header: { fontSize: 20, bold: true, marginBottom: 10 } },
     };
 
     pdfMake.createPdf(docDefinition).download("szamla.pdf");
   };
 
+  const saveToCloud = async () => {
+    const user = auth.currentUser;
+    if (!user) return alert("Nincs bejelentkezve!");
+
+    const invoiceRef = collection(db, "users", user.uid, "invoices");
+    await addDoc(invoiceRef, invoiceData);
+    alert("Sikeres mentés a felhőbe.");
+    fetchInvoices();
+  };
+
+  const fetchInvoices = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+    const snapshot = await getDocs(collection(db, "users", user.uid, "invoices"));
+    const list = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    setInvoiceList(list);
+  };
+
+  const loadSelectedInvoice = async () => {
+    const user = auth.currentUser;
+    if (!user || !selectedInvoiceId) return;
+    const ref = doc(db, "users", user.uid, "invoices", selectedInvoiceId);
+    const snapshot = await getDoc(ref);
+    if (snapshot.exists()) setInvoiceData(snapshot.data());
+  };
+
+  const sendEmail = () => {
+    emailjs.send(
+      "service_d31hzrb", // replace with your actual service ID
+      "template_lzqkx1g", // replace with your template ID
+      {
+        name: invoiceData.buyer.name,
+        email: "b.trencsenyi@gmail.com", // Replace with dynamic recipient if needed
+        message: `Számlaszám: ${invoiceData.number}, Összeg: ${total.toLocaleString("hu-HU")} Ft`,
+      },
+      "LyXfjNVPOUd8z2tsS" // replace with your actual public key
+    );
+    alert("E-mail elküldve!");
+  };
+
+  useEffect(() => {
+    fetchInvoices();
+  }, []);
+
   return (
     <Box sx={{ p: 4, maxWidth: "960px", mx: "auto" }}>
-      <Typography variant="h4" gutterBottom>
-        Számla létrehozása
-      </Typography>
+      <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+        <Typography variant="h4">Számla létrehozása</Typography>
+        <Button
+          variant="outlined"
+          color="error"
+          startIcon={<LogoutIcon />}
+          onClick={() => signOut(auth)}
+        >
+          Kijelentkezés
+        </Button>
+      </Box>
 
-      {/* Számla adatok */}
+      <TextField
+        select
+        fullWidth
+        label="Korábbi számlák"
+        value={selectedInvoiceId}
+        onChange={(e) => {
+          setSelectedInvoiceId(e.target.value);
+          loadSelectedInvoice();
+        }}
+        sx={{ mt: 3, mb: 3 }}
+      >
+        <MenuItem value="">Korábbi számla kiválasztása</MenuItem>
+        {invoiceList.map((inv) => (
+          <MenuItem key={inv.id} value={inv.id}>
+            {inv.number || inv.id}
+          </MenuItem>
+        ))}
+      </TextField>
+
+      {/* FORM FIELDS */}
       <Typography variant="h6" sx={{ mt: 3 }}>
         Számla adatok
       </Typography>
@@ -100,9 +187,8 @@ function InvoicePage() {
           <TextField
             label="Számlaszám"
             fullWidth
-            onChange={(e) =>
-              setInvoiceData({ ...invoiceData, number: e.target.value })
-            }
+            value={invoiceData.number}
+            onChange={(e) => setInvoiceData({ ...invoiceData, number: e.target.value })}
           />
         </Grid>
         <Grid item xs={12} md={4}>
@@ -111,9 +197,8 @@ function InvoicePage() {
             type="date"
             fullWidth
             InputLabelProps={{ shrink: true }}
-            onChange={(e) =>
-              setInvoiceData({ ...invoiceData, date: e.target.value })
-            }
+            value={invoiceData.date}
+            onChange={(e) => setInvoiceData({ ...invoiceData, date: e.target.value })}
           />
         </Grid>
         <Grid item xs={12} md={4}>
@@ -122,29 +207,27 @@ function InvoicePage() {
             type="date"
             fullWidth
             InputLabelProps={{ shrink: true }}
-            onChange={(e) =>
-              setInvoiceData({ ...invoiceData, dueDate: e.target.value })
-            }
+            value={invoiceData.dueDate}
+            onChange={(e) => setInvoiceData({ ...invoiceData, dueDate: e.target.value })}
           />
         </Grid>
         <Grid item xs={12} md={4}>
           <TextField
             label="Fizetési mód"
             fullWidth
-            onChange={(e) =>
-              setInvoiceData({ ...invoiceData, paymentMethod: e.target.value })
-            }
+            value={invoiceData.paymentMethod}
+            onChange={(e) => setInvoiceData({ ...invoiceData, paymentMethod: e.target.value })}
           />
         </Grid>
       </Grid>
 
-      {/* Eladó */}
       <Typography variant="h6">Eladó</Typography>
       <Grid container spacing={2} sx={{ mb: 2 }}>
         <Grid item xs={12} md={6}>
           <TextField
             label="Cégnév"
             fullWidth
+            value={invoiceData.seller.name}
             onChange={(e) =>
               setInvoiceData({
                 ...invoiceData,
@@ -157,6 +240,7 @@ function InvoicePage() {
           <TextField
             label="Adószám"
             fullWidth
+            value={invoiceData.seller.taxNumber}
             onChange={(e) =>
               setInvoiceData({
                 ...invoiceData,
@@ -167,13 +251,13 @@ function InvoicePage() {
         </Grid>
       </Grid>
 
-      {/* Vevő */}
       <Typography variant="h6">Vevő</Typography>
       <Grid container spacing={2} sx={{ mb: 2 }}>
         <Grid item xs={12} md={6}>
           <TextField
             label="Cégnév"
             fullWidth
+            value={invoiceData.buyer.name}
             onChange={(e) =>
               setInvoiceData({
                 ...invoiceData,
@@ -186,6 +270,7 @@ function InvoicePage() {
           <TextField
             label="Adószám"
             fullWidth
+            value={invoiceData.buyer.taxNumber}
             onChange={(e) =>
               setInvoiceData({
                 ...invoiceData,
@@ -196,7 +281,6 @@ function InvoicePage() {
         </Grid>
       </Grid>
 
-      {/* Tételek */}
       <Typography variant="h6">Tételek</Typography>
       {invoiceData.rows.map((row, index) => (
         <Grid
@@ -213,7 +297,7 @@ function InvoicePage() {
               onChange={(e) => handleRowChange(index, "description", e.target.value)}
             />
           </Grid>
-          <Grid item xs={3} md={2}>
+          <Grid item xs={4} md={2}>
             <TextField
               label="Mennyiség"
               type="number"
@@ -222,7 +306,7 @@ function InvoicePage() {
               onChange={(e) => handleRowChange(index, "quantity", e.target.value)}
             />
           </Grid>
-          <Grid item xs={3} md={2}>
+          <Grid item xs={4} md={2}>
             <TextField
               label="Nettó ár"
               type="number"
@@ -231,7 +315,7 @@ function InvoicePage() {
               onChange={(e) => handleRowChange(index, "price", e.target.value)}
             />
           </Grid>
-          <Grid item xs={3} md={2}>
+          <Grid item xs={4} md={2}>
             <TextField
               label="ÁFA %"
               type="number"
@@ -256,14 +340,17 @@ function InvoicePage() {
         Összesen (bruttó): {total.toLocaleString("hu-HU")} Ft
       </Typography>
 
-      <Button
-        variant="contained"
-        startIcon={<PictureAsPdfIcon />}
-        sx={{ mt: 2 }}
-        onClick={exportPDF}
-      >
-        PDF exportálás
-      </Button>
+      <Box sx={{ mt: 3, display: "flex", gap: 2, flexWrap: "wrap" }}>
+        <Button variant="contained" startIcon={<PictureAsPdfIcon />} onClick={exportPDF}>
+          PDF EXPORTÁLÁS
+        </Button>
+        <Button variant="outlined" onClick={saveToCloud}>
+          MENTÉS FELHŐBE
+        </Button>
+        <Button variant="outlined" startIcon={<EmailIcon />} onClick={sendEmail}>
+          E-MAIL KÜLDÉS
+        </Button>
+      </Box>
     </Box>
   );
 }
